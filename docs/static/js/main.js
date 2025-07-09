@@ -36,6 +36,7 @@ let clickTimer = null; // 全域可重用，也可放區域變數
 // ✅ 拖曳排序支援（單張 / 多張）「模擬多張拖曳」
 let dragPreview = null;
 
+
 function enableMarqueeSelection(container) {
   container.addEventListener('mousedown', (e) => {
     if (!e.target.closest('.thumb')) {
@@ -588,49 +589,108 @@ deleteSelectedBtn.onclick = () => { pageList = pageList.filter(p => !p.selected)
 clearSelectBtn.onclick = clearSelection;
 
 exportBtn.onclick = async () => {
-  const out = await PDFDocument.create();
+  exportBtn.disabled = true;
+  exportBtn.textContent = '匯出中...';
 
-  for (const p of pageList.filter(p => p.area === 'thumbnails')) {
-    let embeddedImage;
+  try {
+    const out = await PDFDocument.create();
+    const origs = [];
+    for (const f of fileList) {
+      try {
+        const b = await f.arrayBuffer();
+        origs.push(await PDFDocument.load(b));
+      } catch {
+        origs.push(null);
+      }
+    }
 
-    try {
-      // ✅ 根據圖片格式選擇正確嵌入方法
-      if (p.dataURL.startsWith('data:image/jpeg') || p.dataURL.startsWith('data:image/jpg')) {
-        embeddedImage = await out.embedJpg(p.dataURL);
-      } else if (
-        p.dataURL.startsWith('data:image/png') ||
-        p.dataURL.startsWith('data:image/webp') ||
-        p.dataURL.startsWith('data:image/bmp') ||
-        p.dataURL.startsWith('data:image/gif')
-      ) {
-        embeddedImage = await out.embedPng(p.dataURL);  // 多數格式轉 PNG 嵌入
-      } else {
-        console.warn('❗ 不支援的圖片格式，略過：', p.originPageNum || p);
+    // 📦 取得品質設定
+    const qualityLevel = document.getElementById('exportQuality').value;
+    const qualityMap = {
+      high:  { scale: 1.0, quality: 0.9 },
+      medium:{ scale: 0.75, quality: 0.7 },
+      low:   { scale: 0.5, quality: 0.5 }
+    };
+    const { scale, quality } = qualityMap[qualityLevel];
+
+    for (const it of pageList.filter(p => p.area === 'thumbnails')) {
+      if (it.fileType === 'blank') {
+        out.addPage([595, 842]);
         continue;
       }
 
-      // ✅ 建立新頁面並插入圖片，套用旋轉角度
-      const page = out.addPage([embeddedImage.width, embeddedImage.height]);
-      page.drawImage(embeddedImage, {
-        x: 0,
-        y: 0,
-        width: embeddedImage.width,
-        height: embeddedImage.height,
-        rotate: degrees(p.rotation || 0),  // ✅ 套用旋轉角度
+      if (it.fileType === 'pdf' && it.fileIdx >= 0 && origs[it.fileIdx]) {
+        const [copiedPage] = await out.copyPages(origs[it.fileIdx], [it.pageNum - 1]);
+        if (it.rotation) copiedPage.setRotation(degrees(it.rotation));
+        out.addPage(copiedPage);
+        continue;
+      }
+
+      const img = new Image();
+      img.src = it.dataURL;
+
+      await new Promise(resolve => img.onload = resolve);
+
+      // 建立 canvas 並縮放 + 壓縮
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth * scale;
+      canvas.height = img.naturalHeight * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const jpegURL = canvas.toDataURL('image/jpeg', quality);
+
+      const bytes = Uint8Array.from(atob(jpegURL.split(',')[1]), c => c.charCodeAt(0));
+      const embeddedImg = await out.embedJpg(bytes);
+
+      let width = embeddedImg.width;
+      let height = embeddedImg.height;
+      let pageWidth = width;
+      let pageHeight = height;
+      let x = 0, y = 0;
+      const rotation = (it.rotation || 0) % 360;
+
+      if (rotation === 90 || rotation === 270) {
+        pageWidth = height;
+        pageHeight = width;
+      }
+
+      const page = out.addPage([pageWidth, pageHeight]);
+
+      if (rotation === 0) {
+        x = 0; y = 0;
+      } else if (rotation === 90) {
+        x = pageWidth; y = 0;
+      } else if (rotation === 180) {
+        x = pageWidth; y = pageHeight;
+      } else if (rotation === 270) {
+        x = 0; y = pageHeight;
+      }
+
+      page.drawImage(embeddedImg, {
+        x,
+        y,
+        width,
+        height,
+        rotate: degrees(rotation),
       });
-
-    } catch (err) {
-      console.error('❌ 匯出此頁失敗：', p, err);
     }
-  }
 
-  // ✅ 建立 Blob 並觸發下載
-  const blob = new Blob([await out.save()], { type: 'application/pdf' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${outputName.value || 'output'}.pdf`;
-  a.click();
+    const pdfBytes = await out.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${outputName.value || 'output'}.pdf`;
+    a.click();
+
+  } catch (err) {
+    alert('❌ 匯出整份 PDF 失敗');
+    console.error(err);
+  } finally {
+    exportBtn.disabled = false;
+    exportBtn.textContent = '匯出 PDF';
+  }
 };
+
 
 renderAll();
 updateControls();
