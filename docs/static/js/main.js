@@ -449,7 +449,7 @@ function renderAll() {
           }
         });
         updateControls();
-      }, 250);
+      }, 125);
     };
 
     // ✅ 雙擊預覽
