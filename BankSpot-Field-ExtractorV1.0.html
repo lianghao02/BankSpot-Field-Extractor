@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>銀行/熱點明細 抽欄位工具（單檔版）</title>
+  <!-- 讀取 Excel / CSV：使用 xlsx.js（支援 .xlsx/.xls/.csv） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fff;
+      --fg: #111;
+      --muted: #666;
+      --accent: #0b5cdb;
+      --ok: #0a7b32;
+      --warn: #b45e00;
+      --err: #b00020;
+      --chip: #eef3ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#0b0d10; --fg:#e6e6e6; --muted:#9aa3ad; --chip:#142744; }
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      Roboto, "Noto Sans TC", "Microsoft JhengHei", Arial, "PingFang TC", sans-serif;
+      background: var(--bg); color: var(--fg);
+      display: grid; grid-template-rows: auto 1fr; gap: 12px;
+    }
+    header { padding: 16px 16px 0; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .bar {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px;
+    }
+    .btn, label.btn { padding: 8px 12px; border: 1px solid #c9d1e1; border-radius: 8px;
+      background: var(--chip); color: var(--fg); cursor: pointer; user-select:none;
+    }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    input[type="file"] { display: none; }
+    .drop {
+      margin: 12px 16px 0; padding: 18px; border: 2px dashed #aab7cf; border-radius: 12px;
+      text-align: center; color: var(--muted); transition: .2s ease;
+    }
+    .drop.dragover { background: #f6f9ff; border-color: var(--accent); color: var(--fg); }
+
+    main { min-height: 0; display: grid; grid-template-rows: auto 1fr; gap: 8px; padding: 0 16px 16px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+    .chip { background: var(--chip); border: 1px solid #c9d1e1; border-radius: 999px; padding: 4px 10px; color: var(--fg); }
+    .tips { font-size: 12px; color: var(--muted); }
+
+    .table-wrap { min-height: 0; overflow: auto; border: 1px solid #d7dee9; border-radius: 12px; }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+    thead th { position: sticky; top: 0; background: #f7f9fc; color: #3a4758; text-align: left; font-weight: 600; border-bottom: 1px solid #e3e9f3; padding: 10px; }
+    tbody td { border-bottom: 1px solid #eef2f8; padding: 8px 10px; white-space: nowrap; }
+    tbody tr:nth-child(2n) td { background: #fbfcff; }
+
+    details.help { margin-top: 10px; }
+    details.help summary { cursor: pointer; color: var(--accent); }
+    code { background: #eef3ff; padding: 2px 6px; border-radius: 6px; }
+      /* —— 排序表頭樣式 —— */
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable::after { content: '↕'; font-size: 12px; margin-left: 6px; opacity: .45; }
+    th.sortable.sort-asc::after { content: '▲'; opacity: .9; }
+    th.sortable.sort-desc::after { content: '▼'; opacity: .9; }
+    th.sortable.sort-active { color: var(--accent); }
+    /* —— 直列框選（僅同一欄位垂直選取） —— */
+  body.selecting { user-select: none; }
+  td.sel { background: #fff3cd !important; }
+
+  /* —— 分頁選擇 Modal —— */
+  .modal{ position: fixed; inset:0; background: rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; padding: 16px; z-index: 999; }
+  .modal.show{ display:flex; }
+  .modal-card{ background: var(--bg); color: var(--fg); border: 1px solid #c9d1e1; border-radius: 12px; max-width: 560px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+  .modal-card header{ padding: 12px 16px; font-weight: 600; border-bottom: 1px solid #e3e9f3; }
+  .modal-card .content{ max-height: 50vh; overflow: auto; padding: 12px 16px; }
+  .modal-card footer{ padding: 12px 16px; display:flex; gap:8px; justify-content:flex-end; border-top: 1px solid #e3e9f3; }
+  .sheet-list{ display:grid; gap:8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>銀行/熱點明細 抽欄位工具（HTML 本地執行）</h1>
+    <div class="sub">將不同版型的 Excel/CSV（銀行兩版、警察熱點明細）合併成統一欄位：
+      <strong>帳號、交易日期、交易時間、支出金額、存入金額、ATM編號、提款地點</strong>。
+      若缺少相符欄位，顯示 <code>0</code>。
+    </div>
+    <div class="bar">
+      <label class="btn" for="file">選擇檔案（可多選）</label>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv" multiple />
+      <button id="btn-clear" class="btn" type="button">清空結果</button>
+      <button id="btn-export" class="btn" type="button" disabled>下載 CSV</button>
+    </div>
+    <div id="drop" class="drop">拖曳 Excel / CSV 檔案到這裡（可多檔）</div>
+  </header>
+
+  <!-- 分頁選擇（工作表）對話盒 -->
+  <div id="sheetModal" class="modal" aria-hidden="true">
+    <div class="modal-card">
+      <header>選擇要匯入的分頁</header>
+      <div class="content">
+        <div id="sheetFileName" class="sub" style="margin-bottom:8px;"></div>
+        <div class="sheet-list" id="sheetList"></div>
+      </div>
+      <footer>
+        <button id="sheetAll" class="btn" type="button">全選</button>
+        <button id="sheetNone" class="btn" type="button">全不選</button>
+        <button id="sheetCancel" class="btn" type="button">略過此檔</button>
+        <button id="sheetOk" class="btn" type="button">確定</button>
+      </footer>
+    </div>
+  </div>
+
+  <main>
+    <div class="meta">
+      <span class="chip" id="file-count">未載入檔案</span>
+      <span class="chip" id="row-count">0 筆資料</span>
+      <span class="tips">支援：可選擇分頁（工作表）；首列為欄名。</span>
+    </div>
+
+    <div class="table-wrap">
+      <table id="tbl">
+        <thead>
+          <tr>
+            <!-- 統一輸出欄位固定順序 -->
+            <th>帳號</th>
+            <th>交易日期（例：114/04/08）</th>
+            <th>交易時間（例：13:07:00）</th>
+            <th>支出金額</th>
+            <th>存入金額</th>
+            <th>ATM編號</th>
+            <th>提款地點</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <details class="help">
+      <summary>欄位對應與格式規則（點開看）</summary>
+      <ol>
+        <li><strong>帳號</strong>：銀行表用「帳號」，舊式熱點明細用「人頭帳戶」。</li>
+        <li><strong>交易日期</strong>：銀行表用「交易日期」，熱點明細用「提款日期」。若為 <code>YYYYMMDD</code>（如 <code>20250408</code>），轉換為民國格式 <code>114/04/08</code>。若為民國 7 碼（如 <code>1140408</code>），保留為 <code>114/04/08</code>。</li>
+        <li><strong>交易時間</strong>：銀行表用「交易時間」，熱點明細用「提款時間」。<code>hhmmss</code>（如 <code>130700</code>）轉 <code>13:07:00</code>；<code>hhmm</code> 轉 <code>hh:mm:00</code>。</li>
+        <li><strong>支出金額</strong>：銀行表用「支出金額」，熱點明細用「提款金額」。去除正負號與小數（<code>+100.00</code> → <code>100</code>）。金額 ≥ 10,000 以「萬」表示（例如 <code>23,000</code> → <code>2萬3,000</code>；<code>20,000</code> → <code>2萬</code>）。</li>
+        <li><strong>存入金額</strong>：銀行表為「存入金額」，熱點明細無此欄則輸出 <code>0</code>。</li>
+        <li><strong>ATM編號</strong>：銀行表可能為「ATM或端末機代碼」，熱點明細為「ATM編號」。</li>
+        <li><strong>提款地點</strong>：熱點明細為「提款地點」。無對應欄位則輸出 <code>0</code>。</li>
+      </ol>
+    </details>
+  </main>
+
+  <script>
+    // === 使用者需求重點：
+    // 1) 合併不同表頭（銀行兩版、熱點明細）→ 輸出固定 7 欄
+    // 2) 缺欄位顯示 0
+    // 3) 日期 20250408 → 114/04/08（民國）
+    //    亦支援民國 7 碼（1140408）與 Excel 日期序號
+    // 4) 時間 130700 → 13:07:00（亦支援 4 碼 1307）
+    // 5) 金額 +100.00 → 100；≥ 10,000 → 2萬3,000 風格
+
+    // 目標欄位固定順序
+    const OUTPUT_HEADERS = [
+      '帳號','交易日期','交易時間','支出金額','存入金額','ATM編號','提款地點'
+    ];
+
+    // 多版表頭的對應規則（依序找第一個存在者）
+    const FIELD_MAP = {
+      '帳號': ['帳號','人頭帳戶'],
+      '交易日期': ['交易日期','提款日期'],
+      '交易時間': ['交易時間','提款時間'],
+      '支出金額': ['支出金額','提款金額'],
+      '存入金額': ['存入金額'],
+      'ATM編號': ['ATM編號','ATM或端末機代碼'],
+      '提款地點': ['提款地點']
+    };
+
+    const elFile = document.getElementById('file');
+    const elDrop = document.getElementById('drop');
+    const elBody = document.getElementById('tbody');
+    const elBtnExport = document.getElementById('btn-export');
+    const elBtnClear = document.getElementById('btn-clear');
+    const elFileCount = document.getElementById('file-count');
+    const elRowCount = document.getElementById('row-count');
+
+    let mergedRows = []; // 累積所有檔案的結果
+
+    // ————— 事件：選檔 / 拖放 —————
+    elFile.addEventListener('change', async (e) => {
+      await handleFiles(e.target.files);
+      elFile.value = '';
+    });
+
+    ;['dragenter','dragover'].forEach(type => elDrop.addEventListener(type, (e) => {
+      e.preventDefault(); e.stopPropagation(); elDrop.classList.add('dragover');
+    }));
+    ;['dragleave','drop'].forEach(type => elDrop.addEventListener(type, (e) => {
+      e.preventDefault(); e.stopPropagation(); elDrop.classList.remove('dragover');
+    }));
+    elDrop.addEventListener('drop', async (e) => {
+      const files = e.dataTransfer.files;
+      await handleFiles(files);
+    });
+
+    elBtnClear.addEventListener('click', () => {
+      mergedRows = [];
+      elBody.innerHTML = '';
+      elBtnExport.disabled = true;
+      elFileCount.textContent = '未載入檔案';
+      elRowCount.textContent = '0 筆資料';
+    });
+
+    elBtnExport.addEventListener('click', () => {
+      exportCSV(mergedRows);
+    });
+
+    async function handleFiles(fileList) {
+      if (!fileList || fileList.length === 0) return;
+      elFileCount.textContent = `載入 ${fileList.length} 個檔案處理中…`;
+
+      let processed = 0;
+      for (const file of fileList) {
+        const arrayBuffer = await file.arrayBuffer();
+        const wb = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetNames = wb.SheetNames || [];
+
+        let selectedSheets = sheetNames;
+        if (sheetNames.length > 1) {
+          // 讓使用者選擇要處理哪些分頁
+          selectedSheets = await pickSheetsUI(file.name, sheetNames);
+        }
+        if (!selectedSheets || selectedSheets.length === 0) continue; // 略過此檔
+
+        for (const name of selectedSheets) {
+          const ws = wb.Sheets[name];
+          if (!ws) continue;
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+          if (!rows || rows.length === 0) continue;
+          const header = normalizeHeaderRow(rows[0]);
+          const dataRows = rows.slice(1);
+          const picked = dataRows.map(r => pickAndFormatRow(header, r));
+          mergedRows.push(...picked);
+          processed += picked.length;
+        }
+
+        // 每處理一個檔案就重繪一次，避免等待太久
+        renderTable(mergedRows);
+        elBtnExport.disabled = mergedRows.length === 0;
+        elRowCount.textContent = `${mergedRows.length} 筆資料`;
+      }
+
+      elBtnExport.disabled = mergedRows.length === 0;
+      elFileCount.textContent = `已載入 ${fileList.length} 檔`;
+    }
+
+    // —— 工具：表頭正規化（去頭尾空白）——
+    function normalizeHeaderRow(hdrRow) {
+      return hdrRow.map((h, i) => String(h).trim());
+    }
+
+    // —— 依對應表擷取欄位並套格式 ——
+    function pickAndFormatRow(headerRow, dataRow) {
+      // 建立 {欄名: 值} 的快取映射，便於多次擷取
+      const obj = {};
+      for (let i = 0; i < headerRow.length; i++) {
+        const key = headerRow[i] || '';
+        if (!key) continue;
+        obj[key] = dataRow[i];
+      }
+
+      // 取值：依 FIELD_MAP 的候選鍵，找第一個存在且非空
+      const getFirst = (targets) => {
+        for (const k of targets) {
+          if (k in obj) {
+            const v = obj[k];
+            // 允許 0（數字 0）通過；空字串視為空
+            if (v !== '' && v !== null && v !== undefined) return v;
+          }
+        }
+        return null; // 未找到
+      };
+
+      // 各欄位擷取
+      const rawAcct = getFirst(FIELD_MAP['帳號']);
+      const rawDate = getFirst(FIELD_MAP['交易日期']);
+      const rawTime = getFirst(FIELD_MAP['交易時間']);
+      const rawOut = getFirst(FIELD_MAP['支出金額']);
+      const rawIn  = getFirst(FIELD_MAP['存入金額']);
+      const rawATM = getFirst(FIELD_MAP['ATM編號']);
+      const rawLoc = getFirst(FIELD_MAP['提款地點']);
+
+      return [
+        formatAccount(rawAcct),
+        formatROCDate(rawDate),
+        formatTime(rawTime),
+        formatAmount(rawOut),
+        formatAmount(rawIn),
+        formatText(rawATM),
+        formatText(rawLoc)
+      ];
+    }
+
+    // —— 格式：帳號（不做變動，空則 0）——
+    function formatAccount(v) {
+      if (v === null || v === undefined || String(v).trim() === '') return '0';
+      return String(v).trim();
+    }
+
+    // —— 格式：民國日期（輸入 8 碼西元或 7 碼民國或 Excel 序號）→ yyy/mm/dd ——
+    function formatROCDate(v) {
+      if (v === null || v === undefined || v === '') return '0';
+
+      // Excel 日期序號（大概介於 30,000~60,000）
+      if (typeof v === 'number' && v > 30000 && v < 60000 && XLSX && XLSX.SSF) {
+        const d = XLSX.SSF.parse_date_code(v);
+        if (d && d.y && d.m && d.d) {
+          const roc = d.y - 1911; if (roc <= 0) return '0';
+          return `${roc}/${String(d.m).padStart(2,'0')}/${String(d.d).padStart(2,'0')}`;
+        }
+      }
+
+      const digits = String(v).replace(/[^\d]/g, '');
+      if (digits.length === 8) {
+        // 西元 YYYYMMDD → 民國 yyy/mm/dd
+        const yyyy = parseInt(digits.slice(0,4),10);
+        const mm = digits.slice(4,6); const dd = digits.slice(6,8);
+        const roc = yyyy - 1911; if (roc <= 0) return '0';
+        return `${roc}/${mm}/${dd}`;
+      }
+      if (digits.length === 7) {
+        // 民國 yyyMMdd（例如 1140408）→ 114/04/08
+        const yyy = digits.slice(0,3); const mm = digits.slice(3,5); const dd = digits.slice(5,7);
+        return `${yyy}/${mm}/${dd}`;
+      }
+
+      // 已含 / 或 - 的西元日期（嘗試解析）
+      const d2 = new Date(String(v));
+      if (!isNaN(d2.getTime())) {
+        const yyyy = d2.getFullYear(); const mm = String(d2.getMonth()+1).padStart(2,'0'); const dd = String(d2.getDate()).padStart(2,'0');
+        const roc = yyyy - 1911; if (roc <= 0) return '0';
+        return `${roc}/${mm}/${dd}`;
+      }
+      return '0';
+    }
+
+    // —— 格式：時間（支援 6 碼 hhmmss / 4 碼 hhmm / Excel 時分秒序號）——
+    function formatTime(v) {
+      if (v === null || v === undefined || v === '') return '0';
+      if (typeof v === 'number') {
+        // 有些表會把 130700 讀成數字，或時間序號（小數日）
+        if (v > 0 && v < 1 && XLSX && XLSX.SSF) {
+          // Excel 時間是一天的小數，轉為秒
+          const totalSec = Math.round(v * 24 * 60 * 60);
+          const hh = String(Math.floor(totalSec / 3600)).padStart(2,'0');
+          const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2,'0');
+          const ss = String(totalSec % 60).padStart(2,'0');
+          return `${hh}:${mm}:${ss}`;
+        }
+        const s = String(Math.round(v));
+        return fmtTimeFromDigits(s);
+      }
+      const digits = String(v).replace(/[^\d]/g, '');
+      return fmtTimeFromDigits(digits);
+    }
+
+    function fmtTimeFromDigits(s) {
+      if (s.length === 6) return `${s.slice(0,2)}:${s.slice(2,4)}:${s.slice(4,6)}`;
+      if (s.length === 4) return `${s.slice(0,2)}:${s.slice(2,4)}:00`;
+      if (s.length === 2) return `${s}:00:00`;
+      return '0';
+    }
+
+    // —— 格式：金額（去正負號與小數；≥1萬用「x萬y,zzz」）——
+    function formatAmount(v) {
+      if (v === null || v === undefined || v === '') return '0';
+      let s = String(v).trim();
+      // 移除逗號與空白
+      s = s.replace(/,/g, '');
+      // 留下數字與小數與負號
+      const num = Math.abs(parseFloat(s.replace(/[^\d.-]/g, '')));
+      if (isNaN(num)) return '0';
+      const n = Math.floor(num + 1e-6); // 去小數
+      if (n < 10000) return n.toLocaleString('zh-TW');
+      const w = Math.floor(n / 10000);
+      const r = n % 10000;
+      return r === 0 ? `${w}萬` : `${w}萬${r.toLocaleString('zh-TW')}`;
+    }
+
+    // —— 格式：一般文字（空白回傳 0）——
+    function formatText(v) {
+      if (v === null || v === undefined) return '0';
+      const s = String(v).trim();
+      return s === '' ? '0' : s;
+    }
+
+    // —— 繪表 ——
+    function renderTable(rows) {
+      const frag = document.createDocumentFragment();
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        for (const cell of r) {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        }
+        frag.appendChild(tr);
+      }
+      elBody.innerHTML = '';
+      elBody.appendChild(frag);
+      elRowCount.textContent = `${rows.length} 筆資料`;
+    }
+
+    // —— 匯出 CSV（UTF-8 BOM 以利 Excel 正確顯示中文）——
+    function exportCSV(rows) {
+      if (!rows || !rows.length) return;
+      const header = OUTPUT_HEADERS.join(',');
+      const lines = rows.map(r => r.map(escapeCSV).join(','));
+      const csv = [header, ...lines].join('\r\n');
+      const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      a.download = `抽欄位_輸出_${ts}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function escapeCSV(v) {
+      const s = String(v);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+  
+    // —— 分頁選擇 UI（多分頁工作表）——
+    function pickSheetsUI(fileName, sheetNames) {
+      return new Promise((resolve) => {
+        const modal = document.getElementById('sheetModal');
+        const list = document.getElementById('sheetList');
+        const fn = document.getElementById('sheetFileName');
+        const btnAll = document.getElementById('sheetAll');
+        const btnNone = document.getElementById('sheetNone');
+        const btnOk = document.getElementById('sheetOk');
+        const btnCancel = document.getElementById('sheetCancel');
+
+        fn.textContent = `檔案：${fileName}`;
+        list.innerHTML = '';
+        sheetNames.forEach((name, idx) => {
+          const wrap = document.createElement('label');
+          wrap.style.display = 'flex';
+          wrap.style.alignItems = 'center';
+          wrap.style.gap = '8px';
+          const safe = escapeHtml(name);
+          wrap.innerHTML = `<input type="checkbox" data-name="${safe}" checked> <span>${safe}</span>`;
+          list.appendChild(wrap);
+        });
+
+        function collect() {
+          return Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.getAttribute('data-name'));
+        }
+        function close(ret) {
+          document.removeEventListener('keydown', onKey);
+          modal.classList.remove('show');
+          modal.setAttribute('aria-hidden','true');
+          resolve(ret);
+        }
+        function onKey(e) {
+          if (e.key === 'Escape') { e.preventDefault(); close([]); }
+          if (e.key === 'Enter') { e.preventDefault(); close(collect()); }
+        }
+
+        btnAll.onclick = () => list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
+        btnNone.onclick = () => list.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+        btnCancel.onclick = () => close([]);
+        btnOk.onclick = () => close(collect());
+
+        modal.classList.add('show');
+        modal.setAttribute('aria-hidden','false');
+        document.addEventListener('keydown', onKey);
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[ch]));
+    }
+  </script>
+<script>
+  // —— 排序：點擊表頭切換排序（升冪/降冪）——
+  let currentSort = { col: null, dir: 1 }; // 1: asc, -1: desc
+
+  function attachSortHandlers() {
+    const ths = document.querySelectorAll('#tbl thead th');
+    ths.forEach((th, idx) => {
+      th.classList.add('sortable');
+      th.addEventListener('click', () => {
+        if (currentSort.col === idx) {
+          currentSort.dir = -currentSort.dir;
+        } else {
+          currentSort.col = idx;
+          currentSort.dir = 1;
+        }
+        sortBy(idx, currentSort.dir);
+        updateSortIndicators(ths, idx, currentSort.dir);
+      });
+    });
+  }
+
+  function updateSortIndicators(ths, activeIdx, dir) {
+    ths.forEach((th, i) => {
+      th.classList.remove('sort-asc','sort-desc','sort-active');
+      if (i === activeIdx) {
+        th.classList.add('sort-active');
+        th.classList.add(dir === 1 ? 'sort-asc' : 'sort-desc');
+      }
+    });
+  }
+
+  function sortBy(colIdx, dir) {
+    mergedRows.sort((a, b) => compareCells(a[colIdx], b[colIdx], colIdx, dir));
+    renderTable(mergedRows);
+  }
+
+  function compareCells(a, b, colIdx, dir) {
+    const ka = makeKey(a, colIdx);
+    const kb = makeKey(b, colIdx);
+
+    const an = typeof ka === 'number' && !isNaN(ka);
+    const bn = typeof kb === 'number' && !isNaN(kb);
+
+    if (!an && !bn) {
+      const r = String(ka).localeCompare(String(kb), 'zh-Hant', { numeric: true, sensitivity: 'base' });
+      return dir === 1 ? r : -r;
+    }
+    if (!an) return dir === 1 ? 1 : -1; // 無效值（如 0）排後（升冪）/排前（降冪）
+    if (!bn) return dir === 1 ? -1 : 1;
+
+    return dir === 1 ? (ka - kb) : (kb - ka);
+  }
+
+  function makeKey(v, colIdx) {
+    const s = String(v || '').trim();
+    if (s === '' || s === '0') return NaN;
+    if (colIdx === 1) return parseROCDateKey(s); // 交易日期
+    if (colIdx === 2) return parseTimeKey(s);    // 交易時間
+    if (colIdx === 3 || colIdx === 4) return parseAmountKey(s);  // 金額
+    return s.toLowerCase();          // 其他欄位字串排序（不分大小寫）
+  }
+
+  function onlyDigits(str) {
+    let out = '';
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      if (ch >= '0' && ch <= '9') out += ch;
+    }
+    return out;
+  }
+
+  function parseROCDateKey(s) {
+    // 期待格式：YYY/MM/DD（民國）
+    const p = s.split('/');
+    if (p.length !== 3) return NaN;
+    const y = parseInt(p[0],10) + 1911;
+    const mm = parseInt(p[1],10);
+    const dd = parseInt(p[2],10);
+    if (isNaN(y) || isNaN(mm) || isNaN(dd)) return NaN;
+    return y*10000 + mm*100 + dd;
+  }
+
+  function parseTimeKey(s) {
+    const t = s.split(':');
+    if (t.length !== 3) return NaN;
+    const hh = parseInt(t[0],10);
+    const mm = parseInt(t[1],10);
+    const ss = parseInt(t[2],10);
+    if (isNaN(hh) || isNaN(mm) || isNaN(ss)) return NaN;
+    return hh*3600 + mm*60 + ss;
+  }
+
+  function parseAmountKey(s) {
+    // 支援："2萬3,000"、"2萬"、"23,000"、"100" 等
+    if (s.indexOf('萬') !== -1) {
+      const parts = s.split('萬');
+      const w = parseInt(onlyDigits(parts[0]), 10) || 0;
+      const r = parseInt(onlyDigits(parts[1] || ''), 10) || 0;
+      return w*10000 + r;
+    }
+    const n = parseInt(onlyDigits(s), 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  // 初始化排序表頭（頁面載入時掛事件）
+  attachSortHandlers();
+
+  // —— 直列框選（僅在同一欄位向上/下拖曳選取）——
+  (function setupColumnSelect(){
+    const tbody = document.getElementById('tbody');
+    let selecting = false;
+    let startRow = -1;
+    let colIdx = -1;
+
+    function clearSelection(){
+      tbody.querySelectorAll('td.sel').forEach(td => td.classList.remove('sel'));
+    }
+    function applySelection(col, r1, r2){
+      clearSelection();
+      const rows = tbody.querySelectorAll('tr');
+      const a = Math.max(0, Math.min(r1, r2));
+      const b = Math.min(rows.length - 1, Math.max(r1, r2));
+      for (let i = a; i <= b; i++) {
+        const td = rows[i]?.children[col];
+        if (td) td.classList.add('sel');
+      }
+    }
+
+    tbody.addEventListener('mousedown', (e) => {
+      const td = e.target.closest('td');
+      if (!td) return;
+      const tr = td.parentElement;
+      colIdx = Array.prototype.indexOf.call(tr.children, td);
+      startRow = Array.prototype.indexOf.call(tbody.children, tr);
+      selecting = true;
+      document.body.classList.add('selecting');
+      applySelection(colIdx, startRow, startRow);
+      e.preventDefault();
+    });
+
+    tbody.addEventListener('mouseover', (e) => {
+      if (!selecting) return;
+      const td = e.target.closest('td');
+      if (!td) return;
+      const tr = td.parentElement;
+      const hoverCol = Array.prototype.indexOf.call(tr.children, td);
+      if (hoverCol !== colIdx) return; // 鎖定同一欄
+      const row = Array.prototype.indexOf.call(tbody.children, tr);
+      applySelection(colIdx, startRow, row);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!selecting) return;
+      selecting = false;
+      document.body.classList.remove('selecting');
+    });
+  })();
+</script>
+</body>
+</html>
