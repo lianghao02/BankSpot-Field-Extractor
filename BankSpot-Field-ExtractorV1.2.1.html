@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BankSpot 欄位抽取器 · V1.3</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 24 24'%3E%3Cpath fill='%230b5cdb' d='M12 2L2 7v2h20V7L12 2zm-7 9v9h14v-9H5zm2 2h10v5H7v-5z'/%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#f7fbff; --fg:#152033; --muted:#516179; --chip:#ecf3ff;
+    --panel:#ffffff; --border:#d5e3f7; --soft:#eff6ff; --accent:#0b5cdb;
+    --thead:#f1f6ff; --thead-border:#e0ecff; --hover:#eef5ff; --drag:#e6f0ff;
+    --shadow: 0 8px 24px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b0d10; --fg:#e9eef5; --muted:#9aa8b6; --chip:#182232;
+      --panel:#0f1318; --border:#223042; --soft:#101621; --accent:#5aa7ff;
+      --thead:#101926; --thead-border:#1b2a3d; --hover:#122033; --drag:#0f2039; --shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC","Microsoft JhengHei", Arial, "PingFang TC", sans-serif;
+    display:grid; grid-template-rows:auto 1fr; gap:12px;
+  }
+  header{padding:16px 16px 0}
+  h1{margin:0 0 6px; font-size:20px; display:flex; align-items:center; gap:10px}
+  .sub{color:var(--muted); font-size:13px}
+  .bar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px}
+  .btn, label.btn{
+    display:inline-flex; align-items:center; gap:8px; padding:8px 12px;
+    border:1px solid var(--border); border-radius:10px;
+    background:linear-gradient(180deg, var(--chip), var(--soft));
+    color:var(--fg); cursor:pointer; user-select:none; box-shadow:var(--shadow);
+  }
+  .btn:disabled{opacity:.55; cursor:not-allowed; box-shadow:none}
+  .btn svg{width:16px; height:16px}
+  input[type="file"]{display:none}
+  .drop{margin:12px 16px 0; padding:18px; border:2px dashed var(--border); border-radius:12px;
+    text-align:center; color:var(--muted); transition:.2s ease; background:var(--panel); box-shadow:var(--shadow)}
+  .drop.dragover{ background:var(--drag); border-color:var(--accent); color:var(--fg)}
+  .filters{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px}
+  .input{padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--fg)}
+  main{min-height:0; display:grid; grid-template-rows:auto 1fr; gap:8px; padding:0 16px 16px}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; color:var(--muted)}
+  .chip{background:linear-gradient(180deg, var(--chip), var(--soft)); border:1px solid var(--border); border-radius:999px; padding:4px 10px; color:var(--fg)}
+  .tips{font-size:12px; color:var(--muted)}
+  .table-wrap{min-height:0; overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--panel); box-shadow:var(--shadow)}
+  table{border-collapse:separate; border-spacing:0; width:100%; font-size:14px}
+  thead th{
+    position:sticky; top:0; text-align:left; font-weight:600; padding:10px;
+    background:var(--thead); color:var(--fg); border-bottom:1px solid var(--thead-border);
+    white-space:nowrap; user-select:none;
+  }
+  tbody td{ border-bottom:1px solid var(--border); padding:8px 10px; white-space:nowrap; transition:background .15s ease }
+  tbody tr:hover td{ background:var(--hover)}
+  th.sortable{cursor:pointer}
+  th.sortable .sort-icon{opacity:.45; margin-left:6px; font-size:12px}
+  th.sortable.sort-active{color:var(--accent)}
+  th.sortable.sort-asc .sort-icon::after{content:'▲'; opacity:.9}
+  th.sortable.sort-desc .sort-icon::after{content:'▼'; opacity:.9}
+  th.sortable:not(.sort-asc):not(.sort-desc) .sort-icon::after{content:'↕'}
+  .drag-handle{display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-right:6px; opacity:.6; cursor:grab}
+  /* 多選 */
+  td.sel{ background:rgba(99, 165, 255, .25) !important; outline:1px solid rgba(99,165,255,.6) }
+  /* Segments */
+  .segments{ display:inline-flex; border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:var(--shadow); background:var(--panel) }
+  .seg{ padding:8px 12px; cursor:pointer; user-select:none; }
+  .seg.active{ background:var(--chip); color:var(--fg); font-weight:600; }
+  /* Modal */
+  .modal{ position:fixed; inset:0; background:rgba(0,0,0,.35); display:none; align-items:center; justify-content:center; padding:16px; z-index:999 }
+  .modal.show{ display:flex }
+  .modal-card{ background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:14px; width:min(820px, 100%); box-shadow:var(--shadow) }
+  .modal-card header{ padding:12px 16px; font-weight:700; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; justify-content:space-between }
+  .modal-card .content{ max-height:60vh; overflow:auto; padding:12px 16px }
+  .modal-card footer{ padding:12px 16px; display:flex; gap:8px; justify-content:flex-end; border-top:1px solid var(--border) }
+  .picker-toolbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px}
+  .tag{padding:6px 10px; border:1px solid var(--border); border-radius:999px; cursor:pointer; background:var(--chip)}
+  .tag.active{outline:2px solid var(--accent)}
+  .search{padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--fg); flex:1}
+  .col-list{ display:grid; gap:8px }
+  .col-list.grid-2{ grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+  .col-item{ display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:linear-gradient(180deg, var(--chip), var(--soft)) }
+  .col-item[draggable="true"]{ cursor:grab }
+  .col-item.dragover{ outline:2px dashed var(--accent) }
+</style>
+</head>
+<body>
+<header>
+  <h1>
+    <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2 2 7v2h20V7zM5 11v9h14v-9z"/></svg>
+    BankSpot 欄位抽取器 · V1.3
+  </h1>
+  <div class="sub">離線單檔｜雙模式｜日期篩選｜欄位拖曳＋排序｜矩形多選複製｜CSV 匯出</div>
+
+  <div class="bar">
+    <label class="btn" for="file">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16l4-4h10a2 2 0 0 0 2-2V8z" fill="currentColor"/></svg>
+      選擇檔案（可多選）
+    </label>
+    <input id="file" type="file" accept=".xlsx,.xls,.csv,.xlsm" multiple />
+
+    <div class="segments" id="modeSeg">
+      <div class="seg active" data-mode="normalized" title="將多版本來源轉成一致七欄">統一欄位</div>
+      <div class="seg" data-mode="raw" title="使用原始表頭（可挑選/排序）">來源欄位</div>
+    </div>
+
+    <button id="btn-cols" class="btn" type="button" title="（統一欄位）選擇顯示欄位與順序">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h12v2H3zm0 5h8v2H3z" fill="currentColor"/></svg>
+      選擇欄位
+    </button>
+    <button id="btn-raw-cols" class="btn" type="button" title="（來源欄位）勾選原始欄位並排序" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h12v2H3zm0 5h8v2H3z" fill="currentColor"/></svg>
+      選擇來源欄位
+    </button>
+
+    <button id="btn-copy" class="btn" type="button" disabled title="複製所選（Ctrl/⌘+C）">
+      <svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12zM20 5H8a2 2 0 0 0-2 2v16h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h12z" fill="currentColor"/></svg>
+      複製所選
+    </button>
+    <button id="btn-export" class="btn" type="button" disabled title="匯出 CSV">
+      <svg viewBox="0 0 24 24"><path d="M5 20h14v-2H5m7-14L8.5 9h2.5v6h3V9h2.5z" fill="currentColor"/></svg>
+      下載 CSV
+    </button>
+    <button id="btn-clear" class="btn" type="button" title="清空結果">
+      <svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z" fill="currentColor"/></svg>
+      清空
+    </button>
+  </div>
+
+  <div class="filters">
+    <span>日期篩選：</span>
+    <input id="dateFrom" class="input" type="date" />
+    <span>～</span>
+    <input id="dateTo" class="input" type="date" />
+    <button id="btn-apply-date" class="btn" type="button">套用</button>
+    <button id="btn-reset-date" class="btn" type="button">清除</button>
+  </div>
+
+  <div id="drop" class="drop">拖曳 Excel / CSV / XLSM 檔案到這裡（可多檔）</div>
+</header>
+
+<!-- 分頁選擇 -->
+<div id="sheetModal" class="modal" aria-hidden="true">
+  <div class="modal-card">
+    <header>選擇要匯入的分頁</header>
+    <div class="content">
+      <div id="sheetFileName" class="sub" style="margin-bottom:8px;"></div>
+      <div class="sheet-list" id="sheetList"></div>
+    </div>
+    <footer>
+      <button id="sheetAll" class="btn" type="button">全選</button>
+      <button id="sheetNone" class="btn" type="button">全不選</button>
+      <button id="sheetCancel" class="btn" type="button">略過此檔</button>
+      <button id="sheetOk" class="btn" type="button">確定</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 統一欄位挑選器（雙欄） -->
+<div id="colModal" class="modal" aria-hidden="true">
+  <div class="modal-card">
+    <header>
+      <span>選擇輸出欄位與順序（統一欄位）</span>
+      <input id="colSearch" class="search" placeholder="搜尋欄位（例：金額）" />
+    </header>
+    <div class="content">
+      <div class="picker-toolbar">
+        <span class="tag" data-preset="all">全部</span>
+        <span class="tag" data-preset="common">常用</span>
+        <span class="tag" data-preset="basic">基礎</span>
+        <span class="tag" data-preset="none">清空</span>
+      </div>
+      <div class="col-list grid-2" id="colList"></div>
+    </div>
+    <footer>
+      <button id="colReset" class="btn" type="button">重設預設順序</button>
+      <button id="colCancel" class="btn" type="button">取消</button>
+      <button id="colApply" class="btn" type="button">套用</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 來源欄位挑選器（雙欄） -->
+<div id="rawColModal" class="modal" aria-hidden="true">
+  <div class="modal-card">
+    <header>
+      <span>選擇輸出欄位與順序（來源欄位）</span>
+      <input id="rawColSearch" class="search" placeholder="搜尋原始欄位..." />
+    </header>
+    <div class="content">
+      <div class="picker-toolbar">
+        <span class="tag" data-preset="all">全部</span>
+        <span class="tag" data-preset="money">金額</span>
+        <span class="tag" data-preset="datetime">日期/時間</span>
+        <span class="tag" data-preset="none">清空</span>
+      </div>
+      <p class="sub" style="margin:0 0 8px">以下為已載入檔案（所選分頁）的原始標題（Union）。勾選需要的欄位；拖曳可改順序。</p>
+      <div class="col-list grid-2" id="rawColList"></div>
+    </div>
+    <footer>
+      <button id="rawColCancel" class="btn" type="button">取消</button>
+      <button id="rawColApply" class="btn" type="button">套用</button>
+    </footer>
+  </div>
+</div>
+
+<main>
+  <div class="meta">
+    <span class="chip" id="file-count">未載入檔案</span>
+    <span class="chip" id="row-count">0 筆資料</span>
+    <span class="chip" id="mode-chip">模式：統一欄位</span>
+    <span class="tips">滑鼠拖曳可矩形選取；按住 Ctrl/⌘ 可多段選取；Ctrl/⌘+C 直接複製。</span>
+  </div>
+  <div class="table-wrap">
+    <table id="tbl">
+      <thead><tr id="thead-row"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+/* ================== Module: Utils ================== */
+const Utils = (() => {
+  const OUTPUT_HEADERS = ['帳號','交易日期','交易時間','支出金額','存入金額','ATM編號','提款地點'];
+  const FIELD_MAP = {
+    '帳號': ['帳號','人頭帳戶'],
+    '交易日期': ['交易日期','提款日期'],
+    '交易時間': ['交易時間','提款時間'],
+    '支出金額': ['支出金額','提款金額','交易金額'],
+    '存入金額': ['存入金額'],
+    'ATM編號': ['ATM編號','ATM或端末機代碼'],
+    '提款地點': ['提款地點']
+  };
+  const escapeCSV = (v) => {
+    const s = String(v ?? '');
+    return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  };
+  const parseDateKeyFromROC = (rocStr) => {
+    const p = String(rocStr).split('/');
+    if (p.length!==3) return NaN;
+    const y = parseInt(p[0],10)+1911, m=parseInt(p[1],10), d=parseInt(p[2],10);
+    if (isNaN(y)||isNaN(m)||isNaN(d)) return NaN;
+    return y*10000 + m*100 + d;
+  };
+  const formatAccount = (v) => (v===null||v===undefined||String(v).trim()==='') ? '0' : String(v).trim();
+  const formatROCDateSafe = (v) => {
+    if (v===null || v===undefined || v==='') return '0';
+    if (typeof v === 'number' && v >= 1 && window.XLSX?.SSF){
+      const d = XLSX.SSF.parse_date_code(v);
+      if (d?.y && d?.m && d?.d){ const roc=d.y-1911; if (roc<=0) return '0'; return `${roc}/${String(d.m).padStart(2,'0')}/${String(d.d).padStart(2,'0')}`; }
+    }
+    let s = String(v).trim().replace(/[．。.-]/g,'/').replace(/／/g,'/');
+    const d2 = new Date(s);
+    if (!isNaN(d2.getTime())){
+      const yyyy = d2.getFullYear(), mm = String(d2.getMonth()+1).padStart(2,'0'), dd = String(d2.getDate()).padStart(2,'0');
+      const roc = yyyy - 1911; if (roc<=0) return '0';
+      return `${roc}/${mm}/${dd}`;
+    }
+    const digits = s.replace(/[^\d]/g,'');
+    if (digits.length===8){
+      const yyyy = parseInt(digits.slice(0,4),10); const mm=digits.slice(4,6); const dd=digits.slice(6,8);
+      const roc = yyyy-1911; if (roc<=0) return '0';
+      return `${roc}/${mm}/${dd}`;
+    }
+    if (digits.length===7){
+      const yyy = digits.slice(0,3); const mm=digits.slice(3,5); const dd=digits.slice(5,7);
+      return `${yyy}/${mm}/${dd}`;
+    }
+    const m = s.match(/^(\d{3})\/(\d{1,2})\/(\d{1,2})$/);
+    if (m){ const yyy=m[1], mm=m[2].padStart(2,'0'), dd=m[3].padStart(2,'0'); return `${yyy}/${mm}/${dd}`; }
+    return '0';
+  };
+  const timeFromDigits = (s) => {
+    if (s.length===6) return `${s.slice(0,2)}:${s.slice(2,4)}:${s.slice(4,6)}`;
+    if (s.length===4) return `${s.slice(0,2)}:${s.slice(2,4)}:00`;
+    if (s.length===2) return `${s}:00:00`;
+    return '0';
+  };
+  const formatTimeSafe = (v) => {
+    if (v===null||v===undefined||v==='') return '0';
+    if (typeof v==='number'){
+      if (v>0 && v<1 && window.XLSX?.SSF){
+        const totalSec = Math.round(v * 24 * 60 * 60);
+        const hh = String(Math.floor(totalSec/3600)).padStart(2,'0');
+        const mm = String(Math.floor((totalSec%3600)/60)).padStart(2,'0');
+        const ss = String(totalSec%60).padStart(2,'0');
+        return `${hh}:${mm}:${ss}`;
+      }
+      return timeFromDigits(String(Math.round(v)));
+    }
+    const digits = String(v).replace(/[^\d]/g,'');
+    if (digits.length>=2) return timeFromDigits(digits);
+    return '0';
+  };
+  // 金額：含 +123.00 也會正確解析；輸出採「萬」規則
+  const formatAmount = (v) => {
+    if (v===null||v===undefined||v==='') return '0';
+    let s = String(v).trim().replace(/,/g,'');
+    // 將 + / - 號剝離，只保留數值絕對值顯示（方向由欄位本身區分）
+    const num = Math.abs(parseFloat(s.replace(/[^\d.-]/g,'')));
+    if (isNaN(num)) return '0';
+    const n = Math.round(num); // 四捨五入為整數元
+    if (n<10000) return n.toLocaleString('zh-TW');
+    const w = Math.floor(n/10000), r = n%10000;
+    return r===0 ? `${w}萬` : `${w}萬${r.toLocaleString('zh-TW')}`;
+  };
+  const amountToNumber = (s) => {
+    s = String(s||'').trim();
+    if (s==='0'||s==='') return 0;
+    if (s.includes('萬')){
+      const [wPart, rest=''] = s.split('萬');
+      const w = parseInt(wPart.replace(/[^\d]/g,''),10)||0;
+      const r = parseInt(rest.replace(/[^\d]/g,''),10)||0;
+      return w*10000 + r;
+    }
+    const n = parseInt(s.replace(/[^\d]/g,''),10);
+    return isNaN(n)?0:n;
+  };
+  const formatText = (v) => {
+    if (v===null||v===undefined) return '0';
+    const s=String(v).trim(); return s===''?'0':s;
+  };
+  const normalizeHeaderRow = (hdr) => hdr.map(h => String(h).trim());
+  const getFirst = (obj, cands) => { for (const k of cands){ if (k in obj){ const v=obj[k]; if (v!==''&&v!==null&&v!==undefined) return v; } } return null; };
+  const OUTPUT = { OUTPUT_HEADERS, FIELD_MAP, escapeCSV, parseDateKeyFromROC, formatAccount, formatROCDateSafe, formatTimeSafe, formatAmount, amountToNumber, formatText, normalizeHeaderRow, getFirst };
+  return OUTPUT;
+})();
+
+/* ================== Module: XLSX Loader & Sheet Picker ================== */
+const Loader = (() => {
+  const elFile = document.getElementById('file');
+  const elDrop = document.getElementById('drop');
+  const elFileCount = document.getElementById('file-count');
+  const sheetModal = document.getElementById('sheetModal');
+  const sheetList = document.getElementById('sheetList');
+  const sheetFileName = document.getElementById('sheetFileName');
+  const btnAll = document.getElementById('sheetAll');
+  const btnNone = document.getElementById('sheetNone');
+  const btnOk = document.getElementById('sheetOk');
+  const btnCancel = document.getElementById('sheetCancel');
+
+  const onFiles = async (files, consumeSheetsCallback) => {
+    if (!files || !files.length) return;
+    elFileCount.textContent = `載入 ${files.length} 個檔案處理中…`;
+
+    for (const file of files){
+      const arrayBuffer = await file.arrayBuffer();
+      const wb = XLSX.read(arrayBuffer, { type:'array' });
+      const sheets = wb.SheetNames || [];
+      let selectedSheets = [];
+
+      // 嚴格以使用者勾選為準，僅在單一分頁時自動選該分頁
+      if (sheets.length <= 1) selectedSheets = sheets.length ? [sheets[0]] : [];
+      else selectedSheets = await pickSheetsUI(file.name, sheets);
+
+      if (!selectedSheets || !selectedSheets.length) continue; // 使用者略過
+
+      for (const name of selectedSheets) {
+        const ws = wb.Sheets[name]; if (!ws) continue;
+        await consumeSheetsCallback({ fileName:file.name, sheetName:name, ws });
+      }
+    }
+    elFileCount.textContent = `已載入 ${files.length} 檔`;
+  };
+
+  const pickSheetsUI = (fileName, sheetNames) => new Promise((resolve)=>{
+    sheetFileName.textContent = `檔案：${fileName}`;
+    sheetList.innerHTML = '';
+    sheetNames.forEach(name=>{
+      const lab = document.createElement('label');
+      lab.style.display='block'; lab.style.margin='6px 0';
+      lab.innerHTML = `<input type="checkbox"> <span>${escapeHtml(name)}</span>`;
+      sheetList.appendChild(lab);
+    });
+
+    const collect = ()=> Array.from(sheetList.querySelectorAll('input[type=checkbox]'))
+                            .map((cb,i)=> cb.checked ? sheetNames[i] : null)
+                            .filter(Boolean);
+
+    function close(ret){ document.removeEventListener('keydown', onKey); sheetModal.classList.remove('show'); sheetModal.setAttribute('aria-hidden','true'); resolve(ret); }
+    function onKey(e){ if (e.key==='Escape'){ e.preventDefault(); close([]); } if (e.key==='Enter'){ e.preventDefault(); close(collect()); } }
+
+    btnAll.onclick = ()=> sheetList.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=true);
+    btnNone.onclick= ()=> sheetList.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false);
+    btnCancel.onclick=()=> close([]);
+    btnOk.onclick    =()=> close(collect());
+
+    sheetModal.classList.add('show'); sheetModal.setAttribute('aria-hidden','false');
+    document.addEventListener('keydown', onKey);
+  });
+
+  const escapeHtml = (s)=> String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+  // DnD
+  ['dragenter','dragover'].forEach(t => elDrop.addEventListener(t, (e) => { e.preventDefault(); e.stopPropagation(); elDrop.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(t => elDrop.addEventListener(t, (e) => { e.preventDefault(); e.stopPropagation(); elDrop.classList.remove('dragover'); }));
+  elDrop.addEventListener('drop', async (e) => { await onFiles(e.dataTransfer.files, Model.consumeSheet); UI.updateCounts(); });
+
+  elFile.addEventListener('change', async (e) => { await onFiles(e.target.files, Model.consumeSheet); UI.updateCounts(); e.target.value=''; });
+
+  return { onFiles };
+})();
+
+/* ================== Module: Data Model ================== */
+const Model = (() => {
+  const normalizedRows = []; // { vals:[7], dateKey, inAmt, outAmt }
+  const rawRows = [];        // { data:{},  dateKey, inAmt, outAmt }
+  let mode = 'normalized';   // normalized | raw
+  let filterFrom = null;     // YYYYMMDD number
+  let filterTo   = null;
+  let visibleCols = Utils.OUTPUT_HEADERS.map((_, i) => i);
+  let colEnabled  = Utils.OUTPUT_HEADERS.map(() => true);
+  let rawSelectedHeaders = []; // 空集合允許（顯示 0 欄）
+
+  const consumeSheet = async ({sheetName, ws})=>{
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+    if (!rows || !rows.length) return;
+    const header = Utils.normalizeHeaderRow(rows[0]);
+    const dataRows = rows.slice(1);
+
+    for (const r of dataRows){
+      const obj = {};
+      for (let i=0;i<header.length;i++){ const key = header[i] || ''; if (!key) continue; obj[key] = r[i]; }
+
+      const pick = (key)=> Utils.getFirst(obj, Utils.FIELD_MAP[key]);
+      const uni = [
+        Utils.formatAccount(pick('帳號')),
+        Utils.formatROCDateSafe(pick('交易日期')),
+        Utils.formatTimeSafe(pick('交易時間')),
+        Utils.formatAmount(pick('支出金額')),
+        Utils.formatAmount(pick('存入金額')),
+        Utils.formatText(pick('ATM編號')),
+        Utils.formatText(pick('提款地點'))
+      ];
+
+      // dateKey / 金額方向（用於排序、篩選；V1.3 不再上色）
+      const dKey = Utils.parseDateKeyFromROC(uni[1]);
+      const inAmtN = Utils.amountToNumber(uni[4]);
+      const outAmtN= Utils.amountToNumber(uni[3]);
+
+      normalizedRows.push({ vals:uni, dateKey:dKey, inAmt:inAmtN, outAmt:outAmtN });
+      rawRows.push({ data:obj, dateKey:dKey, inAmt:inAmtN, outAmt:outAmtN });
+    }
+    UI.render();
+  };
+
+  const setMode = (m)=>{ mode = m; UI.render(); };
+  const getMode = ()=> mode;
+
+  const setDateFilter = (from, to)=> { filterFrom=from; filterTo=to; UI.render(); };
+  const clearDateFilter=()=> { filterFrom=null; filterTo=null; UI.render(); };
+
+  const passDate = (dateKey)=>{
+    if (isNaN(dateKey)) return true;
+    if (filterFrom && dateKey < filterFrom) return false;
+    if (filterTo && dateKey > filterTo) return false;
+    return true;
+  };
+
+  const getRawHeadersUniverse = ()=>{
+    const set = new Set();
+    for (const r of rawRows) for (const k of Object.keys(r.data)) if (k && String(k).trim()) set.add(String(k).trim());
+    return Array.from(set);
+  };
+
+  const inferTypeByHeader = (h)=>{
+    const s = String(h);
+    if (s.includes('日期')) return 'date';
+    if (s.includes('時間')) return 'time';
+    if (s.includes('金額')) return 'amount';
+    return 'text';
+  };
+
+  const getDisplayHeaders = ()=>{
+    if (mode==='normalized'){
+      return visibleCols.filter(i=>colEnabled[i]).map(i=>Utils.OUTPUT_HEADERS[i]);
+    } else {
+      return rawSelectedHeaders.slice(); // 允許空集合
+    }
+  };
+
+  const getDisplayRows = ()=>{
+    const rows = [];
+    if (mode==='normalized'){
+      const order = visibleCols.filter(i=>colEnabled[i]);
+      for (const r of normalizedRows){ if (!passDate(r.dateKey)) continue; rows.push(order.map(i => r.vals[i])); }
+    } else {
+      if (!rawSelectedHeaders.length) return rows;
+      for (const r of rawRows){
+        if (!passDate(r.dateKey)) continue;
+        const out = [];
+        for (const key of rawSelectedHeaders){
+          const v = r.data[key];
+          switch(inferTypeByHeader(key)){
+            case 'date':  out.push(Utils.formatROCDateSafe(v)); break;
+            case 'time':  out.push(Utils.formatTimeSafe(v));    break;
+            case 'amount':out.push(Utils.formatAmount(v));      break;
+            default:      out.push(v===null||v===undefined?'':String(v));
+          }
+        }
+        rows.push(out);
+      }
+    }
+    return rows;
+  };
+
+  // 排序
+  const sortNormalized = (internalCol, dir)=>{
+    const idx = Array.from(normalizedRows.keys());
+    const makeKey = (s,colIdx)=>{
+      s = String(s||'').trim();
+      if (s===''||s==='0') return NaN;
+      if (colIdx===1){ const p = s.split('/'); if (p.length!==3) return NaN;
+        const y = parseInt(p[0],10)+1911, m=parseInt(p[1],10), d=parseInt(p[2],10);
+        if (isNaN(y)||isNaN(m)||isNaN(d)) return NaN; return y*10000 + m*100 + d; }
+      if (colIdx===2){ const t = s.split(':'); if (t.length!==3) return NaN;
+        const hh=parseInt(t[0],10), mm=parseInt(t[1],10), ss=parseInt(t[2],10);
+        if (isNaN(hh)||isNaN(mm)||isNaN(ss)) return NaN; return hh*3600+mm*60+ss; }
+      if (colIdx===3 || colIdx===4){
+        if (s.includes('萬')){ const [wPart, rest=''] = s.split('萬');
+          const w = parseInt(wPart.replace(/[^\d]/g,''),10)||0; const r = parseInt((rest||'').replace(/[^\d]/g,''),10)||0;
+          return w*10000 + r; }
+        const n = parseInt(s.replace(/[^\d]/g,''),10); return isNaN(n) ? 0 : n;
+      }
+      return s.toLowerCase();
+    };
+    const cmp = (a,b,colIdx,dir)=>{
+      const ka = makeKey(a,colIdx), kb = makeKey(b,colIdx);
+      const an = (typeof ka === 'number' && !isNaN(ka));
+      const bn = (typeof kb === 'number' && !isNaN(kb));
+      if (!an && !bn) {
+        const r = String(a).localeCompare(String(b),'zh-Hant',{numeric:true, sensitivity:'base'});
+        return dir===1 ? r : -r;
+      }
+      if (!an) return dir===1 ? 1 : -1;
+      if (!bn) return dir===1 ? -1 : 1;
+      return dir===1 ? (ka-kb) : (kb-ka);
+    };
+    idx.sort((i,j)=> cmp(normalizedRows[i].vals[internalCol], normalizedRows[j].vals[internalCol], internalCol, dir));
+    reorderByIndex(idx, normalizedRows); reorderByIndex(idx, rawRows);
+    UI.render();
+  };
+
+  const sortRawByKey = (key, dir)=>{
+    const idx = Array.from(rawRows.keys());
+    const cmpAny = (a, b, dir)=>{
+      const sa = String(a ?? '').trim(); const sb = String(b ?? '').trim();
+      const na = parseFloat(sa.replace(/[^\d.-]/g,'')); const nb = parseFloat(sb.replace(/[^\d.-]/g,''));
+      const an = !isNaN(na); const bn = !isNaN(nb);
+      if (an && bn){ return dir===1 ? (na-nb) : (nb-na) }
+      const r = sa.localeCompare(sb,'zh-Hant',{numeric:true, sensitivity:'base'}); return dir===1 ? r : -r;
+    };
+    idx.sort((i,j)=> cmpAny(rawRows[i].data[key], rawRows[j].data[key], dir));
+    reorderByIndex(idx, rawRows); reorderByIndex(idx, normalizedRows);
+    UI.render();
+  };
+
+  const reorderByIndex = (order, arr)=>{ const cp = order.map(i=>arr[i]); arr.length=0; arr.push(...cp); };
+
+  // 公開設定
+  const setVisibleCols = (order, enabled)=>{ visibleCols=order; colEnabled=enabled; UI.render(); };
+  const resetVisibleCols = ()=>{ visibleCols = Utils.OUTPUT_HEADERS.map((_,i)=>i); colEnabled = Utils.OUTPUT_HEADERS.map(()=>true); };
+  const setRawSelectedHeaders = (keys)=>{ rawSelectedHeaders = keys.slice(); UI.render(); };
+
+  return {
+    consumeSheet,
+    getDisplayHeaders, getDisplayRows,
+    setMode, getMode,
+    setDateFilter, clearDateFilter,
+    sortNormalized, sortRawByKey,
+    resetVisibleCols, setVisibleCols, setRawSelectedHeaders,
+    getRawHeadersUniverse,
+    _internal:{ normalizedRows, rawRows } // 給 UI 取總筆數與索引用
+  };
+})();
+
+/* ================== Module: Selection (矩形多選與複製) ================== */
+const Selection = (() => {
+  const elBody = document.getElementById('tbody');
+  const btnCopy = document.getElementById('btn-copy');
+  let selectionRanges = []; let selecting = false; let startCell = null;
+
+  const clear = ()=>{ selectionRanges = []; redraw(); };
+  const normalize = ({r1,c1,r2,c2})=> ({ r1:Math.min(r1,r2), c1:Math.min(c1,c2), r2:Math.max(r1,r2), c2:Math.max(c1,c2) });
+  const addRange = (r1,c1,r2,c2)=>{ selectionRanges.push(normalize({r1,c1,r2,c2})); redraw(); };
+
+  const redraw = ()=>{
+    btnCopy.disabled = selectionRanges.length === 0 || elBody.querySelectorAll('tr').length===0;
+    elBody.querySelectorAll('td.sel').forEach(td=>td.classList.remove('sel'));
+    const rows = elBody.querySelectorAll('tr');
+    selectionRanges.forEach(rg=>{
+      for (let r=rg.r1; r<=rg.r2; r++){
+        const tr = rows[r]; if (!tr) continue;
+        for (let c=rg.c1; c<=rg.c2; c++){
+          const td = tr.children[c]; if (td) td.classList.add('sel');
+        }
+      }
+    });
+  };
+
+  const posFromEvent = (e)=>{
+    const td = e.target.closest('td'); if (!td) return null;
+    const tr = td.parentElement;
+    const r = Array.prototype.indexOf.call(elBody.children, tr);
+    const c = Array.prototype.indexOf.call(tr.children, td);
+    return {r,c};
+  };
+
+  elBody.addEventListener('mousedown', (e)=>{
+    const pos = posFromEvent(e); if (!pos) return;
+    selecting = true; startCell = pos;
+    if (!(e.ctrlKey || e.metaKey)) clear();
+    const cur = normalize({r1:pos.r,c1:pos.c,r2:pos.r,c2:pos.c});
+    selectionRanges.push(cur); redraw(); e.preventDefault();
+  });
+  elBody.addEventListener('mousemove', (e)=>{
+    if (!selecting || !startCell) return;
+    const pos = posFromEvent(e); if (!pos) return;
+    const last = selectionRanges[selectionRanges.length-1];
+    Object.assign(last, normalize({r1:startCell.r,c1:startCell.c,r2:pos.r,c2:pos.c}));
+    redraw();
+  });
+  window.addEventListener('mouseup', ()=>{ selecting=false; startCell=null; });
+
+  async function copySelected(){
+    if (!selectionRanges.length){ await copyWhole(); return; }
+    const rows = elBody.querySelectorAll('tr');
+    const blocks = selectionRanges.map(rg=>{
+      const lines = [];
+      for (let r=rg.r1; r<=rg.r2; r++){
+        const tr = rows[r]; if (!tr) continue;
+        const cells = [];
+        for (let c=rg.c1; c<=rg.c2; c++){
+          const td = tr.children[c];
+          cells.push(td ? td.textContent : '');
+        }
+        lines.push(cells.join('\t'));
+      }
+      return lines.join('\n');
+    });
+    const tsv = blocks.join('\n\n');
+    await writeClipboard(tsv);
+  }
+  async function copyWhole(){
+    const rows = elBody.querySelectorAll('tr');
+    const lines = Array.from(rows).map(tr => Array.from(tr.children).map(td=>td.textContent).join('\t'));
+    await writeClipboard(lines.join('\n'));
+  }
+  async function writeClipboard(text){
+    try{
+      await navigator.clipboard.writeText(text);
+      btnCopy.textContent = '已複製！';
+      setTimeout(()=> btnCopy.textContent='複製所選', 900);
+    }catch{
+      const ta = document.createElement('textarea');
+      ta.style.position='fixed'; ta.style.opacity='0'; ta.value = text;
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+    }
+  }
+  btnCopy.addEventListener('click', copySelected);
+  document.addEventListener('keydown', (e)=>{
+    const isCopy = (e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey);
+    if (!isCopy) return;
+    if (!document.activeElement || document.activeElement === document.body) {
+      e.preventDefault(); copySelected();
+    }
+  });
+
+  return { clear, addRange };
+})();
+
+/* ================== Module: UI (表格、排序、欄位挑選、模式切換) ================== */
+const UI = (() => {
+  const elHeadRow = document.getElementById('thead-row');
+  const elBody = document.getElementById('tbody');
+  const elRowCount = document.getElementById('row-count');
+  const elModeChip  = document.getElementById('mode-chip');
+  const elBtnExport = document.getElementById('btn-export');
+  const elBtnClear = document.getElementById('btn-clear');
+  const elBtnCopy  = document.getElementById('btn-copy');
+
+  const elDateFrom = document.getElementById('dateFrom');
+  const elDateTo   = document.getElementById('dateTo');
+  document.getElementById('btn-apply-date').onclick = ()=>{
+    const f = elDateFrom.value ? Number(elDateFrom.value.replace(/-/g,'')) : null;
+    const t = elDateTo.value   ? Number(elDateTo.value.replace(/-/g,''))   : null;
+    Model.setDateFilter(f,t);
+  };
+  document.getElementById('btn-reset-date').onclick = ()=>{
+    elDateFrom.value=''; elDateTo.value=''; Model.clearDateFilter();
+  };
+
+  // 模式切換
+  document.querySelectorAll('#modeSeg .seg').forEach(seg=>{
+    seg.addEventListener('click', ()=>{
+      document.querySelectorAll('#modeSeg .seg').forEach(s=>s.classList.remove('active'));
+      seg.classList.add('active');
+      const mode = seg.dataset.mode;
+      Model.setMode(mode);
+      document.getElementById('btn-cols').style.display = (mode==='normalized') ? '' : 'none';
+      document.getElementById('btn-raw-cols').style.display = (mode==='raw') ? '' : 'none';
+      elModeChip.textContent = '模式：' + (mode==='normalized'?'統一欄位':'來源欄位');
+    });
+  });
+
+  // 清空
+  elBtnClear.addEventListener('click', ()=>{
+    const a = Model._internal.normalizedRows, b = Model._internal.rawRows;
+    a.length=0; b.length=0;
+    render();
+    updateCounts();
+  });
+
+  // 匯出
+  elBtnExport.addEventListener('click', ()=>{
+    const rows = Model.getDisplayRows(), headers = Model.getDisplayHeaders();
+    if (!rows?.length || !headers?.length) return;
+    const header = headers.join(',');
+    const lines = rows.map(r => r.map(Utils.escapeCSV).join(','));
+    const csv = [header, ...lines].join('\r\n');
+    const blob = new Blob(["\uFEFF"+csv], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-'); a.download = `抽欄位_輸出_${ts}.csv`; a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function renderHead(){
+    elHeadRow.innerHTML = '';
+    const headers = Model.getDisplayHeaders();
+    headers.forEach((name, idx) => {
+      const th = document.createElement('th');
+      th.draggable = true; th.classList.add('sortable');
+
+      if (Model.getMode()==='normalized'){
+        // 取得對應內部欄位索引
+        const all = Utils.OUTPUT_HEADERS.map((_,i)=>i);
+        // 找出目前顯示順序：從真正表頭 DOM 之外取得困難，改由 headers 對應 Model.getDisplayHeaders 的順序推導
+        // 這裡改走安全路：在 renderBody 內用同一組 headers/rows，排序時由 dataset.col/rawKey 取得
+        const colIdx = idx; // 暫放位置序（用 data-att 保存真實索引）
+        th.dataset.viewIndex = String(colIdx);
+      } else {
+        th.dataset.raw='1';
+        th.dataset.key = Model.getDisplayHeaders()[idx];
+      }
+
+      const handle = document.createElement('span'); handle.className = 'drag-handle';
+      handle.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 6h6M9 10h6M9 14h6M9 18h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      const title = document.createElement('span'); title.textContent = name;
+      const sortIcon = document.createElement('span'); sortIcon.className = 'sort-icon';
+      th.appendChild(handle); th.appendChild(title); th.appendChild(sortIcon);
+      elHeadRow.appendChild(th);
+    });
+    attachSortHandlers();
+    attachDragHeaders();
+  }
+
+  function renderBody(){
+    const rows = Model.getDisplayRows();
+    const frag = document.createDocumentFragment();
+    for (const r of rows){
+      const tr = document.createElement('tr');
+      for (const cell of r){ const td=document.createElement('td'); td.textContent = cell; tr.appendChild(td); }
+      frag.appendChild(tr);
+    }
+    elBody.innerHTML = ''; elBody.appendChild(frag);
+  }
+
+  function render(){
+    Selection.clear();
+    renderHead();
+    renderBody();
+    updateCounts();
+    const hasRows = elBody.querySelectorAll('tr').length > 0;
+    const hasCols = Model.getDisplayHeaders().length > 0;
+    elBtnCopy.disabled = !(hasRows && hasCols);
+    elBtnExport.disabled = !(hasRows && hasCols);
+  }
+
+  // 排序狀態
+  let currentSort = { col:null, dir:1, rawKey:null };
+
+  function attachSortHandlers(){
+    const ths = elHeadRow.querySelectorAll('th');
+    ths.forEach((th, viewIdx) => {
+      th.classList.remove('sort-asc','sort-desc','sort-active');
+      th.addEventListener('click', (e) => {
+        if (e.target.closest('.drag-handle')) return;
+
+        if (Model.getMode()==='normalized'){
+          // 以視圖欄位位置排序：視圖欄位對應到實際輸出 headers 順序
+          const internalCol = viewIdx; // 視圖第幾欄
+          if (currentSort.col === internalCol){ currentSort.dir = -currentSort.dir; }
+          else { currentSort.col = internalCol; currentSort.rawKey = null; currentSort.dir = 1; }
+          // 對應到實際資料欄位：直接用顯示行列值比較（Model.sortNormalized 需要內部欄位 index）
+          Model.sortNormalized(internalCol, currentSort.dir);
+          updateSortIndicatorsNormalized(internalCol, currentSort.dir);
+        } else {
+          const key = th.dataset.key;
+          if (currentSort.rawKey === key){ currentSort.dir = -currentSort.dir; }
+          else { currentSort.rawKey = key; currentSort.col = null; currentSort.dir = 1; }
+          Model.sortRawByKey(key, currentSort.dir);
+          updateSortIndicatorsRaw(key, currentSort.dir);
+        }
+      });
+    });
+  }
+  function updateSortIndicatorsNormalized(activeCol, dir){
+    const ths = elHeadRow.querySelectorAll('th');
+    ths.forEach((th, i)=>{ th.classList.remove('sort-asc','sort-desc','sort-active');
+      if (i === activeCol) th.classList.add('sort-active', dir===1?'sort-asc':'sort-desc'); });
+  }
+  function updateSortIndicatorsRaw(activeKey, dir){
+    const ths = elHeadRow.querySelectorAll('th');
+    ths.forEach((th)=>{ th.classList.remove('sort-asc','sort-desc','sort-active');
+      if (th.dataset.key === activeKey) th.classList.add('sort-active', dir===1?'sort-asc':'sort-desc'); });
+  }
+
+  // 表頭拖曳（視圖順序）
+  function attachDragHeaders(){
+    const ths = elHeadRow.querySelectorAll('th');
+    let dragging = null;
+    ths.forEach(th => {
+      th.addEventListener('dragstart', (e)=>{ dragging = th; th.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      th.addEventListener('dragend',   ()=>{ if (dragging) dragging.classList.remove('dragging'); dragging=null; });
+      th.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        const target = th;
+        if (!dragging || dragging===target) return;
+        const rect = target.getBoundingClientRect();
+        const before = (e.clientX - rect.left) < rect.width/2;
+        if (before) target.parentNode.insertBefore(dragging, target);
+        else target.parentNode.insertBefore(dragging, target.nextSibling);
+      });
+      th.addEventListener('drop', ()=>{
+        // 重新計算顯示順序對應到 normalized 可見欄位
+        if (Model.getMode()==='normalized'){
+          // 依目前顯示 headers 的順序，回存到 visibleCols/colEnabled
+          const headersNow = Array.from(elHeadRow.querySelectorAll('th')).map(th => th.innerText.replace('↕','').trim());
+          const order = headersNow.map(h => Utils.OUTPUT_HEADERS.indexOf(h));
+          const enabled = order.map(()=>true);
+          Model.setVisibleCols(order, enabled);
+        } else {
+          const newOrder = []; elHeadRow.querySelectorAll('th').forEach(node => newOrder.push(node.dataset.key));
+          Model.setRawSelectedHeaders(newOrder);
+        }
+      });
+    });
+  }
+
+  const updateCounts = ()=>{
+    elRowCount.textContent = `${Model._internal.normalizedRows.length} 筆資料`;
+  };
+
+  // 欄位挑選器（統一）
+  const elColModal = document.getElementById('colModal'), colList  = document.getElementById('colList');
+  const colApply = document.getElementById('colApply'), colCancel= document.getElementById('colCancel'), colReset = document.getElementById('colReset');
+  const colSearch = document.getElementById('colSearch');
+  document.getElementById('btn-cols').addEventListener('click', ()=>{ rebuildColList(); showModal(elColModal); });
+
+  function rebuildColList(){
+    const q = (colSearch.value||'').trim();
+    colList.innerHTML = '';
+    // 以目前顯示順序重建
+    const headersNow = Model.getDisplayHeaders(); // normalized 下的顯示欄位
+    headersNow.forEach(name=>{
+      if (q && !name.includes(q)) return; // 重要：不用 RegExp，避免 invalid regex
+      const item = document.createElement('div'); item.className='col-item'; item.draggable = true; item.dataset.name = name;
+      item.innerHTML = rowItemHTML(name, true);
+      colList.appendChild(item);
+    });
+    // 加入未顯示欄位
+    Utils.OUTPUT_HEADERS.forEach(name=>{
+      if (headersNow.includes(name)) return;
+      if (q && !name.includes(q)) return;
+      const it = document.createElement('div'); it.className='col-item'; it.draggable = true; it.dataset.name = name;
+      it.innerHTML = rowItemHTML(name, false);
+      colList.appendChild(it);
+    });
+    bindColDrag(colList);
+  }
+  function rowItemHTML(label, checked){
+    return `<span class="drag-handle"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M9 6h6M9 10h6M9 14h6M9 18h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+            <input type="checkbox" ${checked?'checked':''} />
+            <strong>${label}</strong>`;
+  }
+  colSearch.addEventListener('input', rebuildColList);
+  colApply.addEventListener('click', ()=>{
+    const items = Array.from(colList.querySelectorAll('.col-item'));
+    const names = items.map(it => it.dataset.name);
+    const flags = items.map(it => it.querySelector('input[type=checkbox]').checked);
+    if (!flags.some(Boolean)){ alert('請至少選擇 1 個欄位顯示。'); return; }
+    const order = names.filter((_,i)=>flags[i]).map(n => Utils.OUTPUT_HEADERS.indexOf(n));
+    const enabled = order.map(()=>true);
+    Model.setVisibleCols(order, enabled);
+    hideModal(elColModal);
+  });
+  colCancel.addEventListener('click', ()=> hideModal(elColModal));
+  colReset.addEventListener('click', ()=>{ Model.resetVisibleCols(); rebuildColList(); });
+  document.querySelectorAll('#colModal .tag').forEach(tag=>{
+    tag.addEventListener('click', ()=>{
+      const preset = tag.dataset.preset;
+      let names = [];
+      if (preset==='all'){ names = Utils.OUTPUT_HEADERS.slice(); }
+      if (preset==='none'){ names = []; }
+      if (preset==='common'){ names = ['帳號','交易日期','交易時間','支出金額','存入金額']; }
+      if (preset==='basic'){ names = Utils.OUTPUT_HEADERS.filter(h => h!=='提款地點'); }
+      // 構建 order
+      const order = names.map(n => Utils.OUTPUT_HEADERS.indexOf(n));
+      const enabled = order.map(()=>true);
+      Model.setVisibleCols(order, enabled);
+      rebuildColList();
+    });
+  });
+
+  // 來源欄位挑選器
+  const elRawColModal = document.getElementById('rawColModal'), rawColList  = document.getElementById('rawColList');
+  const rawColApply = document.getElementById('rawColApply'), rawColCancel= document.getElementById('rawColCancel');
+  const rawColSearch = document.getElementById('rawColSearch');
+  document.getElementById('btn-raw-cols').addEventListener('click', ()=>{ rebuildRawColList(); showModal(elRawColModal); });
+
+  function rebuildRawColList(){
+    const q = (rawColSearch.value||'').trim();
+    const universe = Model.getRawHeadersUniverse();
+    const selected = Model.getDisplayHeaders(); // raw 模式下：目前已選
+    const inSet = new Set(selected);
+    rawColList.innerHTML='';
+    // 已選在前
+    selected.forEach(h=>{
+      const label = h; if (q && !label.includes(q)) return;
+      const item = document.createElement('div'); item.className='col-item'; item.draggable = true; item.dataset.key = h;
+      item.innerHTML = rowItemHTML(label, true); rawColList.appendChild(item);
+    });
+    // 未選在後
+    universe.filter(h=>!inSet.has(h)).forEach(h=>{
+      const label = h; if (q && !label.includes(q)) return;
+      const item = document.createElement('div'); item.className='col-item'; item.draggable = true; item.dataset.key = h;
+      item.innerHTML = rowItemHTML(label, false); rawColList.appendChild(item);
+    });
+    bindColDrag(rawColList);
+  }
+  rawColSearch.addEventListener('input', rebuildRawColList);
+  rawColApply.addEventListener('click', ()=>{
+    const items = Array.from(rawColList.querySelectorAll('.col-item'));
+    const keys  = items.map(it => it.dataset.key);
+    const flags = items.map(it => it.querySelector('input[type=checkbox]').checked);
+    const chosen = keys.filter((_,i)=>flags[i]);
+    Model.setRawSelectedHeaders(chosen); // 允許空集合
+    hideModal(elRawColModal);
+  });
+  rawColCancel.addEventListener('click', ()=> hideModal(elRawColModal));
+  document.querySelectorAll('#rawColModal .tag').forEach(tag=>{
+    tag.addEventListener('click', ()=>{
+      const preset = tag.dataset.preset;
+      const universe = Model.getRawHeadersUniverse();
+      let set=[];
+      if (preset==='all') set = universe.slice();
+      if (preset==='none') set = [];
+      if (preset==='money') set = universe.filter(h => h.includes('金額'));
+      if (preset==='datetime') set = universe.filter(h => h.includes('日期') || h.includes('時間'));
+      Model.setRawSelectedHeaders(set);
+      rebuildRawColList();
+    });
+  });
+
+  // 公用：簡單拖曳排序（雙欄）
+  function bindColDrag(container){
+    let dragging = null;
+    container.querySelectorAll('.col-item').forEach(it=>{
+      it.addEventListener('dragstart', ()=>{ dragging = it; it.classList.add('dragging') });
+      it.addEventListener('dragend',   ()=>{ it.classList.remove('dragging'); dragging=null });
+      it.addEventListener('dragover', (e)=>{
+        e.preventDefault(); const target = it;
+        if (!dragging || dragging===target) return;
+        const rect = target.getBoundingClientRect(); const before = (e.clientY - rect.top) < rect.height/2;
+        if (before) target.parentNode.insertBefore(dragging, target);
+        else target.parentNode.insertBefore(dragging, target.nextSibling);
+        target.classList.add('dragover');
+      });
+      it.addEventListener('dragleave', ()=> it.classList.remove('dragover'));
+      it.addEventListener('drop', ()=> it.classList.remove('dragover'));
+    });
+  }
+
+  function showModal(m){ m.classList.add('show'); m.setAttribute('aria-hidden','false') }
+  function hideModal(m){ m.classList.remove('show'); m.setAttribute('aria-hidden','true') }
+
+  return { render, updateCounts, bindColDrag, showModal, hideModal };
+})();
+
+/* ================== Boot ================== */
+UI.render();
+</script>
+</body>
+</html>

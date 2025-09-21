@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BankSpot 欄位抽取器 · v1.3</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>
+      <span class="logo" aria-hidden="true">📑</span>
+      BankSpot 欄位抽取器 · v1.3
+    </h1>
+    <p class="sub">離線使用｜分頁挑選｜統一/來源欄位切換｜欄位拖曳排序｜矩形多選複製｜CSV 匯出</p>
+
+    <div class="bar">
+      <label class="btn" for="file">
+        <span class="ico">📂</span> 選擇檔案（可多選）
+      </label>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv,.xlsm" multiple />
+
+      <div class="segments" id="modeSeg" role="tablist" aria-label="輸出模式">
+        <button class="seg active" data-mode="normalized" role="tab" aria-selected="true">統一欄位</button>
+        <button class="seg" data-mode="raw" role="tab" aria-selected="false">來源欄位</button>
+      </div>
+
+      <button id="btn-cols" class="btn" type="button" title="統一欄位顯示/順序">
+        <span class="ico">🧩</span> 選擇欄位
+      </button>
+      <button id="btn-raw-cols" class="btn" type="button" title="來源欄位選擇/排序" style="display:none">
+        <span class="ico">🧩</span> 選擇來源欄位
+      </button>
+
+      <button id="btn-clear" class="btn" type="button"><span class="ico">🧹</span> 清空</button>
+      <button id="btn-copy" class="btn" type="button" disabled title="複製所選（Ctrl/⌘+C）">
+        <span class="ico">📋</span> 複製所選
+      </button>
+      <button id="btn-export" class="btn" type="button" disabled title="匯出 CSV">
+        <span class="ico">💾</span> 下載 CSV
+      </button>
+    </div>
+
+    <div class="filters" aria-label="日期篩選">
+      <input id="dateFrom" class="input" type="date" />
+      <span>～</span>
+      <input id="dateTo" class="input" type="date" />
+      <button id="btn-apply-date" class="btn" type="button"><span class="ico">⏱️</span> 套用日期</button>
+      <button id="btn-reset-date" class="btn" type="button"><span class="ico">♻️</span> 清除日期</button>
+    </div>
+
+    <div id="drop" class="drop" role="region" aria-label="拖曳區">
+      將 Excel / CSV / XLSM 檔案拖曳到此處（可多檔）
+    </div>
+  </header>
+
+  <!-- 分頁選擇 Modal -->
+  <div id="sheetModal" class="modal" aria-hidden="true" aria-labelledby="sheetModalTitle">
+    <div class="modal-card" role="dialog">
+      <header id="sheetModalTitle">選擇要匯入的分頁</header>
+      <div class="content">
+        <div id="sheetFileName" class="sub" style="margin-bottom:8px;"></div>
+        <div class="sheet-list" id="sheetList"></div>
+      </div>
+      <footer>
+        <button id="sheetAll" class="btn" type="button">全選</button>
+        <button id="sheetNone" class="btn" type="button">全不選</button>
+        <button id="sheetCancel" class="btn" type="button">略過此檔</button>
+        <button id="sheetOk" class="btn" type="button">確定</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 統一欄位挑選器 -->
+  <div id="colModal" class="modal" aria-hidden="true">
+    <div class="modal-card" role="dialog">
+      <header>
+        <span>選擇輸出欄位與順序（統一欄位）</span>
+        <input id="colSearch" class="search" placeholder="搜尋欄位（例：金額）" />
+      </header>
+      <div class="content">
+        <div class="picker-toolbar">
+          <span class="tag" data-preset="all">全部</span>
+          <span class="tag" data-preset="common">常用</span>
+          <span class="tag" data-preset="basic">基礎</span>
+          <span class="tag" data-preset="none">清空</span>
+        </div>
+        <div class="col-list grid-2" id="colList"></div>
+      </div>
+      <footer>
+        <button id="colReset" class="btn" type="button">重設預設順序</button>
+        <button id="colCancel" class="btn" type="button">取消</button>
+        <button id="colApply" class="btn" type="button">套用</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- 來源欄位挑選器 -->
+  <div id="rawColModal" class="modal" aria-hidden="true">
+    <div class="modal-card" role="dialog">
+      <header>
+        <span>選擇輸出欄位與順序（來源欄位）</span>
+        <input id="rawColSearch" class="search" placeholder="搜尋原始欄位…" />
+      </header>
+      <div class="content">
+        <div class="picker-toolbar">
+          <span class="tag" data-preset="all">全部</span>
+          <span class="tag" data-preset="money">金額</span>
+          <span class="tag" data-preset="datetime">日期/時間</span>
+          <span class="tag" data-preset="none">清空</span>
+        </div>
+        <p class="sub" style="margin:0 0 8px">以下為已載入檔案（所選分頁）的原始標題（Union）。勾選需要的欄位；拖曳可改順序。</p>
+        <div class="col-list grid-2" id="rawColList"></div>
+      </div>
+      <footer>
+        <button id="rawColCancel" class="btn" type="button">取消</button>
+        <button id="rawColApply" class="btn" type="button">套用</button>
+      </footer>
+    </div>
+  </div>
+
+  <main>
+    <div class="meta">
+      <span class="chip" id="file-count">未載入檔案</span>
+      <span class="chip" id="row-count">0 筆資料</span>
+      <span class="chip" id="mode-chip">模式：統一欄位</span>
+      <span class="tips">拖曳滑鼠可矩形選取；按住 Ctrl/⌘ 可多段加入；Ctrl/⌘+C 直接複製到 Excel。</span>
+    </div>
+    <div class="table-wrap">
+      <table id="tbl">
+        <thead><tr id="thead-row"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ★ 啟動器：先確保 XLSX 載入，再載入主模組 -->
+  <script src="js/bootstrap.js"></script>
+</body>
+</html>
